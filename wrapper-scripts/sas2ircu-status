@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import json
 
 binarypath = "/usr/sbin/sas2ircu"
 if not os.path.isfile(binarypath):
@@ -14,17 +15,21 @@ if len(sys.argv) > 2:
   sys.exit(1)
 
 nagiosmode=False
+zabbixmode=False
 nagiosoutput=''
 nagiosgoodarray=0
 nagiosbadarray=0
 nagiosgooddisk=0
 nagiosbaddisk=0
+zabbixarray=[]
 
 if len(sys.argv) > 1:
   if sys.argv[1] == '--nagios':
     nagiosmode=True
+  elif sys.argv[1] == '--zabbix':
+    zabbixmode=True
   else:
-    print 'Usage: sas2ircu-status [--nagios]'
+    print 'Usage: sas2ircu-status [--nagios] or [--zabbix]'
     sys.exit(1)
 
 bad=False
@@ -125,46 +130,53 @@ def getDiskList(ctrlnmbr):
   list.append([diskid,diskstatus,diskmodel,diskserial,realid])
   return list
 
+
 ctrls=getCtrlList()
 arraymap={}
-if not nagiosmode:
+if not (nagiosmode or zabbixmode):
   print '-- Controller informations --'
   print '-- ID | Model'
   for ctrl in ctrls:
     print 'c'+str(ctrl[0])+' | '+ctrl[1]
   print ''
 
-if not nagiosmode:
+if not (nagiosmode or zabbixmode):
   print '-- Arrays informations --'
   print '-- ID | Type | Size | Status'
 for ctrl in ctrls:
   arraymap[ctrl[0]]=getArrayList(ctrl[0])
   for array in arraymap[ctrl[0]]:
+    arraylist = {}
+    arraylist['{#ARRAY}'] = 'c'+str(ctrl[0])+'u'+str(array[0])
+    zabbixarray.append(arraylist)
     if not array[3] in ['Okay (OKY)', 'Inactive, Okay (OKY)']:
       bad=True
       nagiosbadarray=nagiosbadarray+1
     else:
       nagiosgoodarray=nagiosgoodarray+1
-    if not nagiosmode:
+    if not (nagiosmode or zabbixmode):
       print 'c'+str(ctrl[0])+'u'+str(array[0])+' | '+array[1]+' | '+array[2]+' | '+array[3]
-if not nagiosmode:
+if not (nagiosmode or zabbixmode):
   print ''
 
-if not nagiosmode:
+if not (nagiosmode or zabbixmode):
   print '-- Disks informations'
   print '-- ID | Model | Status'
 for ctrl in ctrls:
   for disk in getDiskList(ctrl[0]):
     # Compare disk enc/slot to array's ones
     for array in arraymap.get(ctrl[0]):
-      for arraydisk in array[4]: 
+      for arraydisk in array[4]:
         if arraydisk == disk[4]:
+          disklist = {}
+          disklist['{#DISK}'] = 'c'+str(ctrl[0])+'u'+str(array[0])+'p'+str(disk[0])
+          zabbixarray.append(disklist)
           if not disk[1] == 'Optimal (OPT)':
             bad=True
             nagiosbaddisk=nagiosbaddisk+1
           else:
             nagiosgooddisk=nagiosgooddisk+1
-          if not nagiosmode:
+          if not (nagiosmode or zabbixmode):
             print 'c'+str(ctrl[0])+'u'+str(array[0])+'p'+str(disk[0])+' | '+disk[2]+' ('+disk[3]+') | '+disk[1]
 
 if nagiosmode:
@@ -173,6 +185,8 @@ if nagiosmode:
     sys.exit(2)
   else:
     print 'RAID OK - Arrays: OK:'+str(nagiosgoodarray)+' Bad:'+str(nagiosbadarray)+' - Disks: OK:'+str(nagiosgooddisk)+' Bad:'+str(nagiosbaddisk)
+elif zabbixmode:
+    print json.dumps({'data': zabbixarray},indent=1,separators=(',',':'))
 else:
   if bad:
     print '\nThere is at least one disk/array in a NOT OPTIMAL state.'
